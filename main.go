@@ -33,14 +33,27 @@ func sse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	go startTwitchCommentStream("#mogra", w, flusher)
+	ircInstance := getIrcConnectionInstance()
+	ircInstance.con.AddCallback("PRIVMSG", func(e *irc.Event) {
+		format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
+		fmt.Fprintf(w, format, e.User, e.Arguments[1], "twitch")
+		flusher.Flush()
+
+	})
+	go ircInstance.con.Loop()
 	// go startTwitterHashTagStream("#mogra", w, flusher)
 
 	<-r.Context().Done()
 	log.Println("コネクションが閉じました")
 }
 
-func startTwitchCommentStream(channelName string, w http.ResponseWriter, flusher http.Flusher) {
+type IrcConnection struct {
+	con *irc.Connection
+}
+
+var ircConnectionInstance *IrcConnection = newIrcConnection()
+
+func newIrcConnection() *IrcConnection {
 	var config TwitchConfig
 	envconfig.Process("TWITCH", &config)
 
@@ -51,19 +64,16 @@ func startTwitchCommentStream(channelName string, w http.ResponseWriter, flusher
 	con.UseTLS = true
 	con.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	con.AddCallback("001", func(e *irc.Event) { con.Join(channelName) })
-	con.AddCallback("PRIVMSG", func(e *irc.Event) {
-		format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
-		fmt.Fprintf(w, format, e.User, e.Arguments[1], "twitch")
-		flusher.Flush()
-
-	})
+	con.AddCallback("001", func(e *irc.Event) { con.Join("#mogra") })
 	err := con.Connect(serverssl)
 	if err != nil {
 		log.Fatal(err)
 	}
+	return &IrcConnection{con: con}
+}
 
-	go con.Loop()
+func getIrcConnectionInstance() *IrcConnection {
+	return ircConnectionInstance
 }
 
 //func startTwitterHashTagStream(hashTag string, w http.ResponseWriter, flusher http.Flusher) {
@@ -97,10 +107,9 @@ func main() {
 	fmt.Println("start main")
 	http.HandleFunc("/events", sse)
 
-
 	port := os.Getenv("PORT")
 	if len(port) == 0 {
 		port = "5000"
 	}
-	http.ListenAndServe(":" + port, nil)
+	http.ListenAndServe(":"+port, nil)
 }
