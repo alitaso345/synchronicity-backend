@@ -29,7 +29,7 @@ type TwitterConfig struct {
 
 func sse(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("start sse...")
-	flusher, _ := w.(http.Flusher)
+	//flusher, _ := w.(http.Flusher)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -61,7 +61,7 @@ func sse(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(replacedTweet)
 
 		fmt.Fprintf(w, format, tweet.User.ScreenName, replacedTweet, "twitter")
-		flusher.Flush()
+		//flusher.Flush()
 	}
 	go streamInstance.demux.HandleChan(streamInstance.con.Messages)
 
@@ -69,6 +69,8 @@ func sse(w http.ResponseWriter, r *http.Request) {
 
 	// Callbackの初期化。これがないとリロード時に同じCallbackが複数登録されてしまう。
 	//ircInstance.con.ClearCallback("PRIVMSG")
+	clearTwitterStreamConnection()
+
 	log.Println("コネクションが閉じました")
 }
 
@@ -121,7 +123,7 @@ func newTwitterStreamConnection() *TwitterConnection {
 
 	client := twitter.NewClient(httpClient)
 
-	filterParams := &twitter.StreamFilterParams{Track: []string{"#恋つづ"}}
+	filterParams := &twitter.StreamFilterParams{Track: []string{"#ぽんぽこ24"}}
 	stream, err := client.Streams.Filter(filterParams)
 	if err != nil {
 		log.Fatal(err)
@@ -132,6 +134,11 @@ func newTwitterStreamConnection() *TwitterConnection {
 
 func getTwitterStreamConnectionInstance() *TwitterConnection {
 	return TwitterConnectionInstance
+}
+
+func clearTwitterStreamConnection() {
+	streamInstance := getTwitterStreamConnectionInstance()
+	streamInstance.demux = twitter.NewSwitchDemux()
 }
 
 func main() {
