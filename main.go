@@ -26,6 +26,7 @@ type TwitchConfig struct {
 //}
 
 func sse(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("start sse...")
 	flusher, _ := w.(http.Flusher)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -44,6 +45,7 @@ func sse(w http.ResponseWriter, r *http.Request) {
 	// go startTwitterHashTagStream("#mogra", w, flusher)
 
 	<-r.Context().Done()
+	ircInstance.con.ClearCallback("PRIVMSG")
 	log.Println("コネクションが閉じました")
 }
 
@@ -64,7 +66,8 @@ func newIrcConnection() *IrcConnection {
 	con.UseTLS = true
 	con.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	con.AddCallback("001", func(e *irc.Event) { con.Join("#mogra") })
+	con.AddCallback("001", func(e *irc.Event) { con.Join("#viva_h") })
+	fmt.Println("IRCコネクション作成")
 	err := con.Connect(serverssl)
 	if err != nil {
 		log.Fatal(err)
