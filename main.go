@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 )
 
 const serverssl = "irc.chat.twitch.tv:6697"
@@ -27,61 +26,29 @@ type TwitterConfig struct {
 	AccessTokenSecret string `envconfig:"ACCESS_TOKEN_SECRET"`
 }
 
-func sse(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("start sse...")
-	//flusher, _ := w.(http.Flusher)
+var messages chan string = make(chan string)
+var twitchMessages chan *irc.Event = make(chan *irc.Event)
+var twitterMessages chan *twitter.Tweet = make(chan *twitter.Tweet)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+func main() {
+	log.Println("Start main...")
 
-	// Twitchのストリーム処理
-	//ircInstance := getIrcConnectionInstance()
-	//ircInstance.con.AddCallback("PRIVMSG", func(e *irc.Event) {
-	//	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
-	//	fmt.Fprintf(w, format, e.User, e.Arguments[1], "twitch")
-	//	flusher.Flush()
-	//
-	//})
-	//go ircInstance.con.Loop()
+	go startTwitchIrc("#raelilblack")
+	//go startTwitterStreaming("#ガンダム三昧")
 
+	http.HandleFunc("/events", sse)
 
-	// Twitterのストリーム処理
-	streamInstance := getTwitterStreamConnectionInstance()
-	streamInstance.demux.Tweet = func(tweet *twitter.Tweet) {
-		format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
-		var replacedTweet string
-
-		if strings.Contains(tweet.Text, "RT") { return }
-
-		replacedTweet = strings.ReplaceAll(tweet.Text, "\n", " ")
-		replacedTweet = strings.ReplaceAll(replacedTweet, "\r", " ")
-
-		fmt.Println(replacedTweet)
-
-		fmt.Fprintf(w, format, tweet.User.ScreenName, replacedTweet, "twitter")
-		//flusher.Flush()
+	port := os.Getenv("PORT")
+	if len(port) == 0 {
+		port = "5000"
 	}
-	go streamInstance.demux.HandleChan(streamInstance.con.Messages)
-
-	<-r.Context().Done()
-
-	// Callbackの初期化。これがないとリロード時に同じCallbackが複数登録されてしまう。
-	//ircInstance.con.ClearCallback("PRIVMSG")
-	clearTwitterStreamConnection()
-
-	log.Println("コネクションが閉じました")
+	http.ListenAndServe(":"+port, nil)
 }
 
-type IrcConnection struct {
-	con *irc.Connection
-}
-
-var ircConnectionInstance *IrcConnection = newIrcConnection()
-
-func newIrcConnection() *IrcConnection {
-	fmt.Println("IRCコネクション作成")
+func startTwitchIrc(channelName string) {
+	if channelName == "" {
+		return
+	}
 
 	var config TwitchConfig
 	envconfig.Process("TWITCH", &config)
@@ -93,27 +60,23 @@ func newIrcConnection() *IrcConnection {
 	con.UseTLS = true
 	con.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	con.AddCallback("001", func(e *irc.Event) { con.Join("#viva_h") })
+	con.AddCallback("001", func(e *irc.Event) { con.Join(channelName) })
+	con.AddCallback("PRIVMSG", func(e *irc.Event) {
+		twitchMessages <- e
+	})
 	err := con.Connect(serverssl)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Printf("Err %s", err)
+		return
 	}
-	return &IrcConnection{con: con}
+
+	con.Loop()
 }
 
-func getIrcConnectionInstance() *IrcConnection {
-	return ircConnectionInstance
-}
-
-type TwitterConnection struct {
-	con *twitter.Stream
-	demux twitter.SwitchDemux
-}
-
-var TwitterConnectionInstance *TwitterConnection = newTwitterStreamConnection()
-
-func newTwitterStreamConnection() *TwitterConnection {
-	fmt.Println("TwitterStreamコネクション作成")
+func startTwitterStreaming(hashTag string) {
+	if hashTag == "" {
+		return
+	}
 
 	var c TwitterConfig
 	envconfig.Process("TWITTER", &c)
@@ -123,31 +86,51 @@ func newTwitterStreamConnection() *TwitterConnection {
 
 	client := twitter.NewClient(httpClient)
 
-	filterParams := &twitter.StreamFilterParams{Track: []string{"#ぽんぽこ24"}}
+	demux := twitter.NewSwitchDemux()
+	demux.Tweet = func(tweet *twitter.Tweet) {
+		twitterMessages <- tweet
+	}
+
+	filterParams := &twitter.StreamFilterParams{Track: []string{hashTag}}
 	stream, err := client.Streams.Filter(filterParams)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return &TwitterConnection{con: stream, demux: twitter.NewSwitchDemux()}
+	demux.HandleChan(stream.Messages)
 }
 
-func getTwitterStreamConnectionInstance() *TwitterConnection {
-	return TwitterConnectionInstance
-}
+func sse(w http.ResponseWriter, r *http.Request) {
+	log.Println("Start sse...")
 
-func clearTwitterStreamConnection() {
-	streamInstance := getTwitterStreamConnectionInstance()
-	streamInstance.demux = twitter.NewSwitchDemux()
-}
+	flusher, _ := w.(http.Flusher)
 
-func main() {
-	fmt.Println("start main")
-	http.HandleFunc("/events", sse)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	port := os.Getenv("PORT")
-	if len(port) == 0 {
-		port = "5000"
-	}
-	http.ListenAndServe(":"+port, nil)
+	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
+
+	go func() {
+		for {
+			select {
+			case msg := <-twitchMessages:
+				fmt.Println(msg.Arguments[1])
+				fmt.Fprintf(w, format, msg.User, msg.Arguments[1], "twitch")
+				flusher.Flush()
+			}
+		}
+	}()
+
+	//go func() {
+	//	for {
+	//		msg := <-twitterMessages
+	//		fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
+	//		flusher.Flush()
+	//	}
+	//}()
+
+	<-r.Context().Done()
+	log.Println("クライアント/サーバ間のコネクションが閉じました")
 }
