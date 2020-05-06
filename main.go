@@ -26,7 +26,6 @@ type TwitterConfig struct {
 	AccessTokenSecret string `envconfig:"ACCESS_TOKEN_SECRET"`
 }
 
-var messages chan string = make(chan string)
 var twitchMessages chan *irc.Event = make(chan *irc.Event)
 var twitterMessages chan *twitter.Tweet = make(chan *twitter.Tweet)
 
@@ -34,7 +33,7 @@ func main() {
 	log.Println("Start main...")
 
 	go startTwitchIrc("#raelilblack")
-	//go startTwitterStreaming("#ガンダム三昧")
+	go startTwitterStreaming("#ガンダム三昧")
 
 	http.HandleFunc("/events", sse)
 
@@ -102,7 +101,6 @@ func startTwitterStreaming(hashTag string) {
 
 func sse(w http.ResponseWriter, r *http.Request) {
 	log.Println("Start sse...")
-
 	flusher, _ := w.(http.Flusher)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -111,25 +109,21 @@ func sse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
-
 	go func() {
 		for {
-			select {
-			case msg := <-twitchMessages:
-				fmt.Println(msg.Arguments[1])
-				fmt.Fprintf(w, format, msg.User, msg.Arguments[1], "twitch")
-				flusher.Flush()
-			}
+			t := <-twitchMessages
+			fmt.Fprintf(w, format, t.User, t.Arguments[1], "twitch")
+			flusher.Flush()
 		}
 	}()
 
-	//go func() {
-	//	for {
-	//		msg := <-twitterMessages
-	//		fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
-	//		flusher.Flush()
-	//	}
-	//}()
+	go func() {
+		for {
+			msg := <-twitterMessages
+			fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
+			flusher.Flush()
+		}
+	}()
 
 	<-r.Context().Done()
 	log.Println("クライアント/サーバ間のコネクションが閉じました")
