@@ -101,7 +101,11 @@ func startTwitterStreaming(hashTag string) {
 
 func sse(w http.ResponseWriter, r *http.Request) {
 	log.Println("Start sse...")
-	flusher, _ := w.(http.Flusher)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Fatalf("unusable as http.Flusher: %v\n", w)
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
