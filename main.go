@@ -32,7 +32,7 @@ var twitterMessages chan *twitter.Tweet = make(chan *twitter.Tweet)
 func main() {
 	log.Println("Start main...")
 
-	go startTwitchIrc("#raelilblack")
+	go startTwitchIrc("#animeilluminati")
 	go startTwitterStreaming("#ガンダム三昧")
 
 	http.HandleFunc("/events", sse)
@@ -113,22 +113,38 @@ func sse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
+	ctx := r.Context()
+
 	go func() {
 		for {
-			t := <-twitchMessages
-			fmt.Fprintf(w, format, t.User, t.Arguments[1], "twitch")
-			flusher.Flush()
+			msg := <-twitchMessages
+
+			select {
+			case <-ctx.Done():
+				log.Println("Clientへチャットイベントの送信を終了します")
+				return
+			default:
+				fmt.Fprintf(w, format, msg.User, msg.Arguments[1], "twitch")
+				flusher.Flush()
+			}
 		}
 	}()
 
 	go func() {
 		for {
 			msg := <-twitterMessages
-			fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
-			flusher.Flush()
+
+			select {
+			case <-ctx.Done():
+				log.Println("Clientへツイートイベント送信を終了します")
+				return
+			default:
+				fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
+				flusher.Flush()
+			}
 		}
 	}()
 
-	<-r.Context().Done()
+	<-ctx.Done()
 	log.Println("クライアント/サーバ間のコネクションが閉じました")
 }
