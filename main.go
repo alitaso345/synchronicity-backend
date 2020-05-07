@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 const serverssl = "irc.chat.twitch.tv:6697"
@@ -32,8 +33,8 @@ var twitterMessages chan *twitter.Tweet = make(chan *twitter.Tweet)
 func main() {
 	log.Println("Start main...")
 
-	go startTwitchIrc("#animeilluminati")
-	go startTwitterStreaming("#ガンダム三昧")
+	go startTwitchIrc("#aloonity")
+	go startTwitterStreaming("#ガルパピコ大盛り_01")
 
 	http.HandleFunc("/events", sse)
 
@@ -102,49 +103,39 @@ func startTwitterStreaming(hashTag string) {
 func sse(w http.ResponseWriter, r *http.Request) {
 	log.Println("Start sse...")
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		log.Fatalf("unusable as http.Flusher: %v\n", w)
-	}
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	quit := make(chan bool)
+	flusher, _ := w.(http.Flusher)
 	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
 	ctx := r.Context()
-
+	
 	go func() {
-		for {
-			msg := <-twitchMessages
+		loop:
+			for {
+				select {
+				case <-ctx.Done():
+					log.Println("クライアント/サーバ間のコネクションが閉じました")
+					quit <- true
+					break loop
+				case msg := <-twitchMessages:
+					log.Println(msg.Arguments[1])
+					fmt.Fprintf(w, format, msg.User, msg.Arguments[1], "twitch")
+					flusher.Flush()
+				case msg := <-twitterMessages:
+					replacedMsg := strings.ReplaceAll(msg.Text, "\n", "")
+					replacedMsg = strings.ReplaceAll(replacedMsg, "\r", "")
 
-			select {
-			case <-ctx.Done():
-				log.Println("Clientへチャットイベントの送信を終了します")
-				return
-			default:
-				fmt.Fprintf(w, format, msg.User, msg.Arguments[1], "twitch")
-				flusher.Flush()
+					log.Println(replacedMsg)
+					fmt.Fprintf(w, format, msg.User.ScreenName, replacedMsg, "twitter")
+					flusher.Flush()
+				}
 			}
-		}
 	}()
 
-	go func() {
-		for {
-			msg := <-twitterMessages
-
-			select {
-			case <-ctx.Done():
-				log.Println("Clientへツイートイベント送信を終了します")
-				return
-			default:
-				fmt.Fprintf(w, format, msg.User.ScreenName, msg.Text, "twitter")
-				flusher.Flush()
-			}
-		}
-	}()
-
-	<-ctx.Done()
-	log.Println("クライアント/サーバ間のコネクションが閉じました")
+	<-quit
 }
+
