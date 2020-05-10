@@ -17,7 +17,7 @@ import (
 
 const serverssl = "irc.chat.twitch.tv:6697"
 
-var twitchMessageMap sync.Map
+var messageMap sync.Map
 
 type MessageChannels struct {
 	twitch  chan *irc.Event
@@ -68,7 +68,7 @@ func startTwitchIrc(channelName string) {
 
 	con.AddCallback("001", func(e *irc.Event) { con.Join(channelName) })
 	con.AddCallback("PRIVMSG", func(e *irc.Event) {
-		twitchMessageMap.Range(func(key, val interface{}) bool {
+		messageMap.Range(func(key, val interface{}) bool {
 			ch, ok := val.(MessageChannels)
 			if ok {
 				ch.twitch <- e
@@ -102,7 +102,7 @@ func startTwitterStreaming(hashTag string) {
 
 	demux := twitter.NewSwitchDemux()
 	demux.Tweet = func(tweet *twitter.Tweet) {
-		twitchMessageMap.Range(func(key, val interface{}) bool {
+		messageMap.Range(func(key, val interface{}) bool {
 			ch, ok := val.(MessageChannels)
 			if ok {
 				ch.twitter <- tweet
@@ -131,7 +131,7 @@ func sse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	messageChannels := MessageChannels{twitch: make(chan *irc.Event), twitter: make(chan *twitter.Tweet)}
-	twitchMessageMap.Store(&w, messageChannels)
+	messageMap.Store(&w, messageChannels)
 
 	flusher, _ := w.(http.Flusher)
 	format := "data: {\"user\": \"%s\", \"text\": \"%s\", \"platform\": \"%s\"}\n\n"
@@ -153,5 +153,5 @@ loop:
 			flusher.Flush()
 		}
 	}
-	twitchMessageMap.Delete(&w)
+	messageMap.Delete(&w)
 }
