@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +21,8 @@ import (
 const serverssl = "irc.chat.twitch.tv:6697"
 
 var messageMap sync.Map
+var isChanged chan bool = make(chan bool)
+var hashTag string = "#母の日"
 
 type MessageChannels struct {
 	twitch  chan *irc.Event
@@ -40,15 +45,21 @@ func main() {
 	log.Println("Start main...")
 
 	go startTwitchIrc("#porterrobinson")
-	go startTwitterStreaming("#SecretSky")
+	go startTwitterStreaming()
 
 	http.HandleFunc("/events", sse)
+	http.HandleFunc("/settings", settings)
 
 	port := os.Getenv("PORT")
 	if len(port) == 0 {
 		port = "5000"
 	}
 	http.ListenAndServe(":"+port, nil)
+}
+
+func changeHashTag(newHashTag string) {
+	hashTag = newHashTag
+	isChanged <- true
 }
 
 func startTwitchIrc(channelName string) {
@@ -87,11 +98,7 @@ func startTwitchIrc(channelName string) {
 	con.Loop()
 }
 
-func startTwitterStreaming(hashTag string) {
-	if hashTag == "" {
-		return
-	}
-
+func startTwitterStreaming() {
 	var c TwitterConfig
 	envconfig.Process("TWITTER", &c)
 	config := oauth1.NewConfig(c.ConsumerKey, c.ConsumerSecret)
@@ -113,13 +120,20 @@ func startTwitterStreaming(hashTag string) {
 		})
 	}
 
-	filterParams := &twitter.StreamFilterParams{Track: []string{hashTag}}
-	stream, err := client.Streams.Filter(filterParams)
-	if err != nil {
-		log.Fatal(err)
-	}
+	for {
+		fmt.Printf("取得するハッシュタグは %s です", hashTag)
+		filterParams := &twitter.StreamFilterParams{Track: []string{hashTag}}
+		stream, err := client.Streams.Filter(filterParams)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	demux.HandleChan(stream.Messages)
+		go demux.HandleChan(stream.Messages)
+
+		<-isChanged
+		stream.Stop()
+		fmt.Println("Twitter Streaming APIを停止します")
+	}
 }
 
 func sse(w http.ResponseWriter, r *http.Request) {
@@ -154,4 +168,23 @@ loop:
 		}
 	}
 	messageMap.Delete(&w)
+}
+
+type SettingsRequest struct {
+	HashTag string `json:"hashTag""`
+}
+
+func settings(w http.ResponseWriter, r *http.Request) {
+	body := r.Body
+	defer body.Close()
+
+	buf := new(bytes.Buffer)
+	io.Copy(buf, body)
+
+	var request SettingsRequest
+	json.Unmarshal(buf.Bytes(), &request)
+
+	changeHashTag(request.HashTag)
+
+	w.WriteHeader(http.StatusNoContent)
 }
