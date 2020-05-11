@@ -21,8 +21,12 @@ import (
 const serverssl = "irc.chat.twitch.tv:6697"
 
 var messageMap sync.Map
+
 var isChanged chan bool = make(chan bool)
+var isChangedTwitchChannel chan bool = make(chan bool)
+
 var hashTag string = "#mogra"
+var twitchChannel string = "#mogra"
 
 type MessageChannels struct {
 	twitch  chan *irc.Event
@@ -44,7 +48,7 @@ type TwitterConfig struct {
 func main() {
 	log.Println("Start main...")
 
-	go startTwitchIrc("#porterrobinson")
+	go startTwitchIrc()
 	go startTwitterStreaming()
 
 	http.HandleFunc("/events", sse)
@@ -62,40 +66,51 @@ func changeHashTag(newHashTag string) {
 	isChanged <- true
 }
 
-func startTwitchIrc(channelName string) {
-	if channelName == "" {
-		return
-	}
+func changeChannel(newChannel string) {
+	twitchChannel = newChannel
+	isChangedTwitchChannel <- true
+}
 
+func startTwitchIrc() {
 	var config TwitchConfig
 	envconfig.Process("TWITCH", &config)
 
 	nick := config.Nick
-	con := irc.IRC(nick, nick)
 
-	con.Password = config.Password
-	con.UseTLS = true
-	con.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	for {
+		fmt.Printf("接続するTwitch IRCは %s です\n", twitchChannel)
 
-	con.AddCallback("001", func(e *irc.Event) { con.Join(channelName) })
-	con.AddCallback("PRIVMSG", func(e *irc.Event) {
-		messageMap.Range(func(key, val interface{}) bool {
-			ch, ok := val.(MessageChannels)
-			if ok {
-				ch.twitch <- e
-			} else {
-				log.Fatalf("Error %v", e)
-			}
-			return true
+		con := irc.IRC(nick, nick)
+
+		con.Password = config.Password
+		con.UseTLS = true
+		con.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+
+		con.AddCallback("001", func(e *irc.Event) { con.Join(twitchChannel) })
+		con.AddCallback("PRIVMSG", func(e *irc.Event) {
+			messageMap.Range(func(key, val interface{}) bool {
+				ch, ok := val.(MessageChannels)
+				if ok {
+					ch.twitch <- e
+				} else {
+					log.Fatalf("Error %v", e)
+				}
+				return true
+			})
 		})
-	})
-	err := con.Connect(serverssl)
-	if err != nil {
-		fmt.Printf("Err %s", err)
-		return
-	}
+		err := con.Connect(serverssl)
+		if err != nil {
+			fmt.Printf("Err %s", err)
+			return
+		}
+		go con.Loop()
 
-	con.Loop()
+		<-isChangedTwitchChannel
+		con.ClearCallback("001")
+		con.ClearCallback("PRIVMSG")
+		con.Quit()
+		log.Println("Twitch IRCに再接続します")
+	}
 }
 
 func startTwitterStreaming() {
@@ -172,9 +187,16 @@ loop:
 
 type SettingsRequest struct {
 	HashTag string `json:"hashTag""`
+	Channel string `json:"channel"`
 }
 
 func settings(w http.ResponseWriter, r *http.Request) {
+	log.Println("settings")
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "PUT")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
 	switch r.Method {
 	case http.MethodPut:
 		body := r.Body
@@ -186,7 +208,12 @@ func settings(w http.ResponseWriter, r *http.Request) {
 		var request SettingsRequest
 		json.Unmarshal(buf.Bytes(), &request)
 
-		changeHashTag(request.HashTag)
+		if hashTag != request.HashTag {
+			changeHashTag(request.HashTag)
+		}
+		if twitchChannel != request.Channel {
+			changeChannel(request.Channel)
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
