@@ -22,7 +22,7 @@ const serverssl = "irc.chat.twitch.tv:6697"
 
 var messageMap sync.Map
 var isChanged chan bool = make(chan bool)
-var hashTag string = "#母の日"
+var hashTag string = "#mogra"
 
 type MessageChannels struct {
 	twitch  chan *irc.Event
@@ -121,7 +121,7 @@ func startTwitterStreaming() {
 	}
 
 	for {
-		fmt.Printf("取得するハッシュタグは %s です", hashTag)
+		fmt.Printf("取得するハッシュタグは %s です\n", hashTag)
 		filterParams := &twitter.StreamFilterParams{Track: []string{hashTag}}
 		stream, err := client.Streams.Filter(filterParams)
 		if err != nil {
@@ -132,7 +132,7 @@ func startTwitterStreaming() {
 
 		<-isChanged
 		stream.Stop()
-		fmt.Println("Twitter Streaming APIを停止します")
+		fmt.Println("Twitter Streaming APIを再起動します")
 	}
 }
 
@@ -175,16 +175,19 @@ type SettingsRequest struct {
 }
 
 func settings(w http.ResponseWriter, r *http.Request) {
-	body := r.Body
-	defer body.Close()
+	switch r.Method {
+	case http.MethodPut:
+		body := r.Body
+		defer body.Close()
 
-	buf := new(bytes.Buffer)
-	io.Copy(buf, body)
+		buf := new(bytes.Buffer)
+		io.Copy(buf, body)
 
-	var request SettingsRequest
-	json.Unmarshal(buf.Bytes(), &request)
+		var request SettingsRequest
+		json.Unmarshal(buf.Bytes(), &request)
 
-	changeHashTag(request.HashTag)
+		changeHashTag(request.HashTag)
 
-	w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
