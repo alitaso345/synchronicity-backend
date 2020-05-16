@@ -194,10 +194,18 @@ func settings(w http.ResponseWriter, r *http.Request) {
 	log.Println("settings")
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "PUT")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		setting := SettingsRequest{HashTag: hashTag, Channel: twitchChannel}
+		json, _ := json.Marshal(setting)
+		w.Write(json)
+
+		w.WriteHeader(http.StatusOK)
 	case http.MethodPut:
 		body := r.Body
 		defer body.Close()
