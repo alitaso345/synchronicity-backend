@@ -27,6 +27,7 @@ var isChangedTwitchChannel chan bool = make(chan bool)
 
 var hashTag string = "#mogra"
 var twitchChannel string = "#mogra"
+var isDisplayRT bool = false
 
 type MessageChannels struct {
 	twitch  chan *irc.Event
@@ -69,6 +70,10 @@ func changeHashTag(newHashTag string) {
 func changeChannel(newChannel string) {
 	twitchChannel = newChannel
 	isChangedTwitchChannel <- true
+}
+
+func changeIsDisplayRT(newIsDisplayRT bool) {
+	isDisplayRT = newIsDisplayRT
 }
 
 func startTwitchIrc() {
@@ -127,6 +132,10 @@ func startTwitterStreaming() {
 		messageMap.Range(func(key, val interface{}) bool {
 			ch, ok := val.(MessageChannels)
 			if ok {
+				if !isDisplayRT && tweet.RetweetedStatus != nil {
+					return true
+				}
+
 				ch.twitter <- tweet
 			} else {
 				log.Fatalf("Error %v", tweet)
@@ -186,8 +195,9 @@ loop:
 }
 
 type SettingsRequest struct {
-	HashTag string `json:"hashTag""`
-	Channel string `json:"channel"`
+	HashTag     string `json:"hashTag"`
+	Channel     string `json:"channel"`
+	IsDisplayRT bool   `json:"isDisplayRT"`
 }
 
 func settings(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +211,7 @@ func settings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-		setting := SettingsRequest{HashTag: hashTag, Channel: twitchChannel}
+		setting := SettingsRequest{HashTag: hashTag, Channel: twitchChannel, IsDisplayRT: isDisplayRT}
 		json, _ := json.Marshal(setting)
 		w.Write(json)
 
@@ -221,6 +231,9 @@ func settings(w http.ResponseWriter, r *http.Request) {
 		}
 		if twitchChannel != request.Channel {
 			changeChannel(request.Channel)
+		}
+		if isDisplayRT != request.IsDisplayRT {
+			changeIsDisplayRT(request.IsDisplayRT)
 		}
 
 		w.WriteHeader(http.StatusNoContent)
