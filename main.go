@@ -25,8 +25,8 @@ var messageMap sync.Map
 var isChanged chan bool = make(chan bool)
 var isChangedTwitchChannel chan bool = make(chan bool)
 
-var hashTag string = "#mogra"
-var twitchChannel string = "#mogra"
+var hashTag string = "#某isNight"
+var twitchChannel string = "#bou_is_twitch"
 var isDisplayRT bool = false
 
 type MessageChannels struct {
